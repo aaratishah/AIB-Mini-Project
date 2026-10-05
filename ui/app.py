@@ -15,11 +15,14 @@ import streamlit as st
 
 
 # ============================================================
-# PUBLIC BACKEND CONFIGURATION
+# CONFIGURATION
 # ============================================================
 
-# Your single ngrok public URL points to the local proxy on port 9000.
-# The proxy routes Data API traffic to port 8000 and n8n traffic to 5678.
+# Public ngrok URL
+# This single URL points to the local proxy on port 9000.
+# The proxy routes:
+#   Data API -> localhost:8000
+#   n8n      -> localhost:5678
 
 DATA_API = "https://awhile-twisting-nursing.ngrok-free.dev"
 
@@ -27,15 +30,18 @@ N8N_BASE = "https://awhile-twisting-nursing.ngrok-free.dev"
 
 N8N_WEBHOOK = N8N_BASE + "/webhook/fraud-alert"
 
+
 # Optional n8n API configuration.
-# Leave this as localhost unless you specifically configure
-# a public n8n API endpoint and API key.
+# This is only needed for the optional Cancel Execution feature.
 N8N_API_BASE = os.getenv(
     "N8N_API_BASE",
     "http://localhost:5678/api/v1"
 )
 
-N8N_API_KEY = os.getenv("N8N_API_KEY", "")
+N8N_API_KEY = os.getenv(
+    "N8N_API_KEY",
+    ""
+)
 
 
 MODELS = [
@@ -49,7 +55,7 @@ MODELS = [
 
 
 # ============================================================
-# STREAMLIT CONFIG
+# STREAMLIT PAGE
 # ============================================================
 
 st.set_page_config(
@@ -57,7 +63,9 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("Governed Agentic AI - Fraud Investigation Console")
+st.title(
+    "Governed Agentic AI - Fraud Investigation Console"
+)
 
 st.caption(
     "Proof of concept. Synthetic data only. "
@@ -66,7 +74,7 @@ st.caption(
 
 
 # ============================================================
-# SESSION STATE INITIALIZATION
+# SESSION STATE
 # ============================================================
 
 if "case" not in st.session_state:
@@ -89,11 +97,13 @@ if "n8n_execution_id" not in st.session_state:
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# HELPER: CLEAR CASE
 # ============================================================
 
 def clear_case():
-    """Clear the currently displayed investigation result."""
+    """
+    Clear the current case from the Streamlit UI.
+    """
 
     st.session_state.case = None
     st.session_state.resume_url = None
@@ -103,13 +113,19 @@ def clear_case():
     st.session_state.n8n_execution_id = None
 
 
+# ============================================================
+# HELPER: CONVERT RESUME URL
+# ============================================================
+
 def convert_resume_url_to_public(resume_url):
     """
-    n8n returns a localhost resume URL such as:
+    n8n normally returns something like:
 
     http://localhost:5678/webhook-waiting/278?signature=...
 
-    Streamlit Cloud cannot access localhost, so convert it to:
+    Streamlit Cloud cannot access the laptop's localhost.
+
+    Convert it to:
 
     https://awhile-twisting-nursing.ngrok-free.dev/webhook-waiting/278?signature=...
     """
@@ -119,62 +135,97 @@ def convert_resume_url_to_public(resume_url):
 
     resume_url = str(resume_url)
 
-    resume_url = resume_url.replace(
+    replacements = [
         "http://localhost:5678",
-        N8N_BASE
-    )
-
-    resume_url = resume_url.replace(
         "http://127.0.0.1:5678",
-        N8N_BASE
-    )
-
-    resume_url = resume_url.replace(
         "https://localhost:5678",
-        N8N_BASE
-    )
+        "https://127.0.0.1:5678"
+    ]
+
+    for local_base in replacements:
+
+        if resume_url.startswith(local_base):
+
+            resume_url = (
+                N8N_BASE
+                +
+                resume_url[len(local_base):]
+            )
+
+            break
 
     return resume_url
 
 
+# ============================================================
+# HELPER: CANCEL N8N EXECUTION
+# ============================================================
+
 def cancel_n8n_execution():
     """
-    Stop the current n8n execution if an n8n API key is configured.
+    Stop the current n8n execution if an n8n API key
+    is configured.
 
-    This is optional. The normal HITL workflow uses the resume URL.
+    This feature is optional.
     """
 
-    execution_id = st.session_state.get("n8n_execution_id")
+    execution_id = (
+        st.session_state.get(
+            "n8n_execution_id"
+        )
+    )
 
     if not execution_id:
-        return False, "No n8n execution ID is available for this case."
 
-    if not N8N_API_KEY:
-        return False, (
-            "UI result cleared, but the n8n execution was not stopped. "
-            "Set the N8N_API_KEY environment variable to enable "
-            "real execution cancellation."
+        return (
+            False,
+            "No n8n execution ID is available for this case."
         )
 
+
+    if not N8N_API_KEY:
+
+        return (
+            False,
+            "UI result cleared, but the n8n execution "
+            "was not stopped. Set the N8N_API_KEY "
+            "environment variable to enable real "
+            "execution cancellation."
+        )
+
+
     try:
+
         r = requests.post(
             f"{N8N_API_BASE}/executions/{execution_id}/stop",
             headers={
                 "X-N8N-API-KEY": N8N_API_KEY
             },
-            timeout=10,
+            timeout=10
         )
 
-        if r.ok:
-            return True, f"n8n execution {execution_id} stopped."
 
-        return False, (
+        if r.ok:
+
+            return (
+                True,
+                f"n8n execution {execution_id} stopped."
+            )
+
+
+        return (
+            False,
             f"n8n stop request failed "
             f"({r.status_code}): {r.text}"
         )
 
+
     except Exception as e:
-        return False, f"Could not stop n8n execution: {e}"
+
+        return (
+            False,
+            f"Could not stop n8n execution: {e}"
+        )
 
 
 # ============================================================
@@ -185,22 +236,29 @@ with st.sidebar:
 
     st.header("Session")
 
+
     role = st.selectbox(
         "Your role",
-        ["investigator", "supervisor"]
+        [
+            "investigator",
+            "supervisor"
+        ]
     )
+
 
     model = st.selectbox(
         "Model",
         MODELS
     )
 
+
     st.markdown("---")
 
     st.caption("Services")
 
+
     # --------------------------------------------------------
-    # Data API health check
+    # Data API health
     # --------------------------------------------------------
 
     try:
@@ -210,14 +268,25 @@ with st.sidebar:
             timeout=10
         )
 
+
         if health_response.ok:
-            st.write("Online: Data API")
+
+            st.write(
+                "Online: Data API"
+            )
+
         else:
-            st.write("OFFLINE: Data API")
+
+            st.write(
+                "OFFLINE: Data API"
+            )
+
 
     except Exception:
 
-        st.write("OFFLINE: Data API")
+        st.write(
+            "OFFLINE: Data API"
+        )
 
 
 # ============================================================
@@ -225,7 +294,10 @@ with st.sidebar:
 # ============================================================
 
 tab_case, tab_audit = st.tabs(
-    ["Investigate alert", "Audit log"]
+    [
+        "Investigate alert",
+        "Audit log"
+    ]
 )
 
 
@@ -235,9 +307,10 @@ tab_case, tab_audit = st.tabs(
 
 with tab_case:
 
-    # --------------------------------------------------------
-    # Fetch alerts
-    # --------------------------------------------------------
+
+    # ========================================================
+    # LOAD ALERTS
+    # ========================================================
 
     try:
 
@@ -250,25 +323,33 @@ with tab_case:
 
         alerts = alerts_response.json()
 
-    except Exception as e:
+
+    except Exception:
 
         alerts = []
 
         st.error(
             "Data API not reachable. "
-            "Make sure the Data API, proxy and ngrok are running."
+            "Make sure the Data API, proxy and ngrok "
+            "are running."
         )
 
 
-    # --------------------------------------------------------
-    # Display alerts
-    # --------------------------------------------------------
+    # ========================================================
+    # DISPLAY ALERTS
+    # ========================================================
 
     if alerts:
 
-        df = pd.DataFrame(alerts)
+        df = pd.DataFrame(
+            alerts
+        )
 
-        c1, c2 = st.columns([1, 2])
+
+        c1, c2 = st.columns(
+            [1, 2]
+        )
+
 
         with c1:
 
@@ -277,22 +358,26 @@ with tab_case:
                 df["alert_id"].tolist()
             )
 
+
         with c2:
 
             st.dataframe(
-                df[df.alert_id == alert_id],
+                df[
+                    df.alert_id == alert_id
+                ],
                 hide_index=True,
                 use_container_width=True
             )
 
 
-        # ----------------------------------------------------
-        # Action buttons
-        # ----------------------------------------------------
+        # ====================================================
+        # ACTION BUTTONS
+        # ====================================================
 
         run_col, clear_col, cancel_col = st.columns(
             [2, 1, 1]
         )
+
 
         with run_col:
 
@@ -301,25 +386,29 @@ with tab_case:
                 type="primary"
             )
 
+
         with clear_col:
 
             clear_clicked = st.button(
                 "Clear result"
             )
 
+
         with cancel_col:
 
             cancel_clicked = st.button(
                 "Cancel execution",
                 disabled=not bool(
-                    st.session_state.get("n8n_execution_id")
+                    st.session_state.get(
+                        "n8n_execution_id"
+                    )
                 )
             )
 
 
-        # ----------------------------------------------------
-        # Clear result
-        # ----------------------------------------------------
+        # ====================================================
+        # CLEAR RESULT
+        # ====================================================
 
         if clear_clicked:
 
@@ -328,9 +417,9 @@ with tab_case:
             st.rerun()
 
 
-        # ----------------------------------------------------
-        # Cancel execution
-        # ----------------------------------------------------
+        # ====================================================
+        # CANCEL EXECUTION
+        # ====================================================
 
         if cancel_clicked:
 
@@ -338,16 +427,25 @@ with tab_case:
 
             clear_case()
 
+
             if ok:
-                st.success(message)
+
+                st.success(
+                    message
+                )
+
             else:
-                st.warning(message)
+
+                st.warning(
+                    message
+                )
+
 
             st.rerun()
 
 
         # ====================================================
-        # RUN AGENTIC INVESTIGATION
+        # RUN INVESTIGATION
         # ====================================================
 
         if run_clicked:
@@ -366,9 +464,9 @@ with tab_case:
 
                 try:
 
-                    # ------------------------------------------------
-                    # Call public n8n webhook
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # CALL PUBLIC N8N WEBHOOK
+                    # --------------------------------------------
 
                     r = requests.post(
                         N8N_WEBHOOK,
@@ -379,12 +477,13 @@ with tab_case:
                         timeout=900
                     )
 
+
                     r.raise_for_status()
 
 
-                    # ------------------------------------------------
-                    # Capture execution ID if available
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # TRY TO GET EXECUTION ID
+                    # --------------------------------------------
 
                     execution_id = (
                         r.headers.get(
@@ -397,15 +496,19 @@ with tab_case:
                     )
 
 
-                    # ------------------------------------------------
-                    # Parse JSON response
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # PARSE N8N RESPONSE
+                    # --------------------------------------------
 
                     try:
 
                         response_data = r.json()
 
-                        if isinstance(response_data, dict):
+
+                        if isinstance(
+                            response_data,
+                            dict
+                        ):
 
                             execution_id = (
                                 execution_id
@@ -414,6 +517,7 @@ with tab_case:
                                     "execution_id"
                                 )
                             )
+
 
                     except Exception:
 
@@ -425,9 +529,9 @@ with tab_case:
                     )
 
 
-                    # ------------------------------------------------
-                    # Get final response
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # USE PARSED RESPONSE
+                    # --------------------------------------------
 
                     data = (
                         response_data
@@ -436,20 +540,39 @@ with tab_case:
                     )
 
 
-                    # ------------------------------------------------
-                    # n8n can return either:
+                    # =================================================
+                    # SUPPORT BOTH N8N RESPONSE FORMATS
+                    # =================================================
                     #
-                    # 1. {"case": {...}, "resume_url": "..."}
+                    # Format 1:
                     #
-                    # OR
+                    # {
+                    #   "case": {...},
+                    #   "resume_url": "..."
+                    # }
                     #
-                    # 2. case fields directly at top level
-                    # ------------------------------------------------
+                    # Format 2:
+                    #
+                    # {
+                    #   "alert_id": "A01",
+                    #   "route": "...",
+                    #   ...
+                    #   "resume_url": "..."
+                    # }
+                    #
+                    # Your current workflow uses Format 2.
+                    # =================================================
 
                     if (
-                        isinstance(data, dict)
+                        isinstance(
+                            data,
+                            dict
+                        )
                         and
-                        isinstance(data.get("case"), dict)
+                        isinstance(
+                            data.get("case"),
+                            dict
+                        )
                     ):
 
                         case = data["case"]
@@ -458,34 +581,46 @@ with tab_case:
 
                         case = (
                             data.copy()
-                            if isinstance(data, dict)
+                            if isinstance(
+                                data,
+                                dict
+                            )
                             else None
                         )
 
 
-                    # ------------------------------------------------
-                    # Extract resume URL
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # GET RESUME URL
+                    # --------------------------------------------
 
                     resume_url = (
-                        data.get("resume_url")
-                        if isinstance(data, dict)
+                        data.get(
+                            "resume_url"
+                        )
+                        if isinstance(
+                            data,
+                            dict
+                        )
                         else None
                     )
 
 
-                    # ------------------------------------------------
-                    # Convert localhost resume URL to public URL
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # CONVERT LOCALHOST URL
+                    # TO PUBLIC NGROK URL
+                    # --------------------------------------------
 
-                    resume_url = convert_resume_url_to_public(
-                        resume_url
+                    resume_url = (
+                        convert_resume_url_to_public(
+                            resume_url
+                        )
                     )
 
 
-                    # ------------------------------------------------
-                    # Extract execution ID from resume URL
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # EXTRACT EXECUTION ID
+                    # FROM RESUME URL
+                    # --------------------------------------------
 
                     if (
                         not st.session_state.n8n_execution_id
@@ -498,6 +633,7 @@ with tab_case:
                             str(resume_url)
                         )
 
+
                         if match:
 
                             st.session_state.n8n_execution_id = (
@@ -505,11 +641,14 @@ with tab_case:
                             )
 
 
-                    # ------------------------------------------------
-                    # Remove resume URL from case display
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # REMOVE RESUME URL FROM DISPLAYED CASE
+                    # --------------------------------------------
 
-                    if isinstance(case, dict):
+                    if isinstance(
+                        case,
+                        dict
+                    ):
 
                         case.pop(
                             "resume_url",
@@ -517,9 +656,9 @@ with tab_case:
                         )
 
 
-                    # ------------------------------------------------
-                    # Store result
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # SAVE RESULT
+                    # --------------------------------------------
 
                     st.session_state.case = case
 
@@ -535,9 +674,9 @@ with tab_case:
                     st.session_state.running = False
 
 
-                    # ------------------------------------------------
-                    # Validate response
-                    # ------------------------------------------------
+                    # --------------------------------------------
+                    # VALIDATION
+                    # --------------------------------------------
 
                     if not case:
 
@@ -546,14 +685,17 @@ with tab_case:
                             "but no case was found."
                         )
 
-                        st.json(data)
+                        st.json(
+                            data
+                        )
 
 
                     elif not resume_url:
 
                         st.warning(
                             "Investigation result received, "
-                            "but no resume URL was returned."
+                            "but no resume URL was returned. "
+                            "Human-in-the-loop may not be available."
                         )
 
 
@@ -567,7 +709,8 @@ with tab_case:
 
                     st.error(
                         "Cannot reach n8n. "
-                        "Make sure n8n, the proxy and ngrok are running."
+                        "Make sure n8n, the proxy and ngrok "
+                        "are running."
                     )
 
 
@@ -577,7 +720,8 @@ with tab_case:
 
                     st.error(
                         "Workflow timed out while waiting for n8n. "
-                        "Check the n8n execution and Respond to Webhook node."
+                        "Check the n8n execution and Respond to "
+                        "Webhook node."
                     )
 
 
@@ -589,7 +733,9 @@ with tab_case:
                         "n8n returned a non-JSON response."
                     )
 
-                    st.code(r.text)
+                    st.code(
+                        r.text
+                    )
 
 
                 except Exception as e:
@@ -601,9 +747,9 @@ with tab_case:
                     )
 
 
-    # ============================================================
+    # ========================================================
     # DISPLAY CASE
-    # ============================================================
+    # ========================================================
 
     case = st.session_state.case
 
@@ -612,17 +758,20 @@ with tab_case:
 
         st.markdown("---")
 
+
         st.subheader(
             f"Case {case['alert_id']} | "
             f"model: {case['model']}"
         )
 
 
-        # --------------------------------------------------------
-        # Top buttons
-        # --------------------------------------------------------
+        # ====================================================
+        # TOP BUTTONS
+        # ====================================================
 
-        top_clear, top_cancel = st.columns([1, 1])
+        top_clear, top_cancel = st.columns(
+            [1, 1]
+        )
 
 
         with top_clear:
@@ -646,39 +795,57 @@ with tab_case:
                     st.session_state.get(
                         "n8n_execution_id"
                     )
-                ),
+                )
             ):
 
                 ok, message = cancel_n8n_execution()
 
                 clear_case()
 
+
                 if ok:
-                    st.success(message)
+
+                    st.success(
+                        message
+                    )
+
                 else:
-                    st.warning(message)
+
+                    st.warning(
+                        message
+                    )
+
 
                 st.rerun()
 
 
-        # --------------------------------------------------------
-        # Case summary metrics
-        # --------------------------------------------------------
+        # ====================================================
+        # CASE METRICS
+        # ====================================================
 
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4 = st.columns(
+            4
+        )
 
 
         m1.metric(
             "Route",
-            case.get("route", "-")
+            case.get(
+                "route",
+                "-"
+            )
         )
 
 
         m2.metric(
             "Risk score",
             (
-                case.get("risk_score")
-                if case.get("risk_score") is not None
+                case.get(
+                    "risk_score"
+                )
+                if case.get(
+                    "risk_score"
+                ) is not None
                 else "n/a"
             )
         )
@@ -704,11 +871,13 @@ with tab_case:
         )
 
 
-        # --------------------------------------------------------
-        # Route / escalation message
-        # --------------------------------------------------------
+        # ====================================================
+        # ROUTE MESSAGE
+        # ====================================================
 
-        if case.get("route") == "EXCEPTION_ESCALATE":
+        if case.get(
+            "route"
+        ) == "EXCEPTION_ESCALATE":
 
             st.error(
                 "EXCEPTION: "
@@ -722,15 +891,20 @@ with tab_case:
             )
 
 
-        elif case.get("route") == "INJECTION_HOLD":
+        elif case.get(
+            "route"
+        ) == "INJECTION_HOLD":
 
             st.error(
-                "Guardrail triggered: possible prompt injection "
-                "in the free-text note. Held for review."
+                "Guardrail triggered: possible prompt "
+                "injection in the free-text note. "
+                "Held for review."
             )
 
 
-        elif case.get("escalate"):
+        elif case.get(
+            "escalate"
+        ):
 
             st.warning(
                 "ESCALATION: senior review required. "
@@ -758,11 +932,13 @@ with tab_case:
             )
 
 
-        # --------------------------------------------------------
-        # Hallucination warning
-        # --------------------------------------------------------
+        # ====================================================
+        # HALLUCINATION WARNING
+        # ====================================================
 
-        if case.get("hallucination_flag"):
+        if case.get(
+            "hallucination_flag"
+        ):
 
             st.warning(
                 "Quality flag: an agent cited a rule "
@@ -770,19 +946,26 @@ with tab_case:
             )
 
 
-        # ========================================================
+        # ====================================================
         # RECOMMENDATION
-        # ========================================================
+        # ====================================================
 
-        rec = case.get("recommendation")
+        rec = case.get(
+            "recommendation"
+        )
 
 
         if rec:
 
-            st.markdown("### Recommendation")
+            st.markdown(
+                "### Recommendation"
+            )
 
 
-            if isinstance(rec, dict):
+            if isinstance(
+                rec,
+                dict
+            ):
 
                 st.info(
                     rec.get(
@@ -792,7 +975,9 @@ with tab_case:
                 )
 
 
-                a, b = st.columns(2)
+                a, b = st.columns(
+                    2
+                )
 
 
                 with a:
@@ -801,13 +986,16 @@ with tab_case:
                         "**Key evidence**"
                     )
 
+
                     for x in rec.get(
                         "key_evidence",
                         []
                     ):
 
                         st.write(
-                            "- " + str(x)
+                            "- "
+                            +
+                            str(x)
                         )
 
 
@@ -817,13 +1005,16 @@ with tab_case:
                         "**Suggested next steps**"
                     )
 
+
                     for x in rec.get(
                         "next_steps",
                         []
                     ):
 
                         st.write(
-                            "- " + str(x)
+                            "- "
+                            +
+                            str(x)
                         )
 
 
@@ -838,14 +1029,17 @@ with tab_case:
                     )
                 )
 
+
             else:
 
-                st.info(str(rec))
+                st.info(
+                    str(rec)
+                )
 
 
-        # ========================================================
+        # ====================================================
         # AGENT OUTPUTS
-        # ========================================================
+        # ====================================================
 
         findings = case.get(
             "agent_findings"
@@ -864,12 +1058,14 @@ with tab_case:
                         f"**{k.title()} agent**"
                     )
 
-                    st.json(v)
+                    st.json(
+                        v
+                    )
 
 
-        # --------------------------------------------------------
-        # Performance / quality information
-        # --------------------------------------------------------
+        # ====================================================
+        # QUALITY / PERFORMANCE
+        # ====================================================
 
         st.caption(
             f"Schema valid: "
@@ -881,9 +1077,9 @@ with tab_case:
         )
 
 
-        # ========================================================
+        # ====================================================
         # HUMAN-IN-THE-LOOP
-        # ========================================================
+        # ====================================================
 
         st.markdown("---")
 
@@ -892,9 +1088,9 @@ with tab_case:
         )
 
 
-        # --------------------------------------------------------
-        # Decision already recorded
-        # --------------------------------------------------------
+        # ====================================================
+        # ALREADY DECIDED
+        # ====================================================
 
         if st.session_state.decided:
 
@@ -903,9 +1099,9 @@ with tab_case:
 
             st.success(
                 f"Decision recorded: "
-                f"{d.get('human_decision')} "
-                f"| outcome: "
-                f"{d.get('final_outcome', '')}"
+                f"{d.get('human_decision', '-')}"
+                f" | outcome: "
+                f"{d.get('final_outcome', '-')}"
             )
 
 
@@ -921,9 +1117,9 @@ with tab_case:
             )
 
 
-        # --------------------------------------------------------
-        # No HITL resume URL
-        # --------------------------------------------------------
+        # ====================================================
+        # NO RESUME URL
+        # ====================================================
 
         elif not st.session_state.resume_url:
 
@@ -932,9 +1128,9 @@ with tab_case:
             )
 
 
-        # --------------------------------------------------------
-        # HITL decision form
-        # --------------------------------------------------------
+        # ====================================================
+        # HUMAN DECISION FORM
+        # ====================================================
 
         else:
 
@@ -959,37 +1155,47 @@ with tab_case:
             )
 
 
-            # ----------------------------------------------------
-            # Supervisor warning
-            # ----------------------------------------------------
+            # ------------------------------------------------
+            # SUPERVISOR WARNING
+            # ------------------------------------------------
 
             if (
                 decision == "reject"
                 and
-                case.get("final_action") == "hold"
+                case.get(
+                    "final_action"
+                ) == "hold"
                 and
                 role != "supervisor"
             ):
 
                 st.warning(
-                    "Overriding a HOLD requires the supervisor "
-                    "role. Submitting will escalate instead."
+                    "Overriding a HOLD requires the "
+                    "supervisor role. Submitting will "
+                    "escalate instead."
                 )
 
 
-            # ----------------------------------------------------
-            # Submit decision
-            # ----------------------------------------------------
+            # ------------------------------------------------
+            # SUBMIT DECISION
+            # ------------------------------------------------
 
             if st.button(
-                "Submit decision"
+                "Submit decision",
+                key="submit_human_decision"
             ):
 
-                # Mandatory comment
+
+                # ============================================
+                # COMMENT VALIDATION
+                # ============================================
+
                 if (
                     decision != "escalate"
                     and
-                    len(comment.strip()) < 5
+                    len(
+                        comment.strip()
+                    ) < 5
                 ):
 
                     st.error(
@@ -1002,9 +1208,22 @@ with tab_case:
 
                     try:
 
-                        # --------------------------------------------
-                        # Send decision to public n8n resume URL
-                        # --------------------------------------------
+                        # ========================================
+                        # VERIFY RESUME URL EXISTS
+                        # ========================================
+
+                        if not st.session_state.resume_url:
+
+                            st.error(
+                                "No active n8n resume URL is available."
+                            )
+
+                            st.stop()
+
+
+                        # ========================================
+                        # SUBMIT HUMAN DECISION TO N8N
+                        # ========================================
 
                         decision_response = requests.post(
                             st.session_state.resume_url,
@@ -1017,25 +1236,79 @@ with tab_case:
                         )
 
 
-                        decision_response.raise_for_status()
+                        # ========================================
+                        # IMPORTANT:
+                        # CHECK N8N HTTP RESPONSE
+                        # ========================================
+
+                        if not decision_response.ok:
+
+                            st.error(
+                                "n8n did not accept the "
+                                "human decision."
+                            )
+
+                            st.code(
+                                f"HTTP {decision_response.status_code}\n\n"
+                                f"{decision_response.text}"
+                            )
+
+                            st.stop()
 
 
-                        # Give n8n a moment to write the audit record
-                        time.sleep(2)
+                        # ========================================
+                        # DECISION ACCEPTED
+                        # ========================================
+
+                        st.success(
+                            f"Human decision '{decision}' "
+                            f"submitted successfully to n8n."
+                        )
 
 
-                        # --------------------------------------------
-                        # Refresh audit log
-                        # --------------------------------------------
+                        # ========================================
+                        # WAIT FOR N8N TO COMPLETE
+                        # AND WRITE AUDIT
+                        # ========================================
 
-                        rows = requests.get(
+                        time.sleep(3)
+
+
+                        # ========================================
+                        # FETCH AUDIT LOG
+                        # ========================================
+
+                        audit_response = requests.get(
                             DATA_API + "/audit",
                             params={
                                 "_t": time.time()
                             },
                             timeout=10
-                        ).json()
+                        )
 
+
+                        if not audit_response.ok:
+
+                            st.warning(
+                                "Decision was accepted by n8n, "
+                                "but the audit log could not "
+                                "be refreshed."
+                            )
+
+                            st.code(
+                                f"HTTP {audit_response.status_code}\n\n"
+                                f"{audit_response.text}"
+                            )
+
+                            st.stop()
+
+
+                        rows = audit_response.json()
+
+
+                        # ========================================
+                        # FIND THIS ALERT'S AUDIT RECORD
+                        # ========================================
 
                         mine = [
                             r
@@ -1045,30 +1318,65 @@ with tab_case:
                         ]
 
 
-                        last = (
-                            mine[-1]
-                            if mine
-                            else {
-                                "human_decision": decision,
-                                "human_comment": comment
-                            }
-                        )
+                        if mine:
+
+                            # Most recent record for this alert
+                            last = mine[-1]
 
 
-                        last["final_outcome"] = (
-                            last.get(
-                                "final_outcome",
-                                "see audit log"
+                            st.session_state.decided = last
+
+                            st.session_state.n8n_execution_id = None
+
+
+                            st.success(
+                                f"Decision recorded in audit log: "
+                                f"{decision}"
                             )
+
+
+                            # ------------------------------------
+                            # Refresh the page so the decision
+                            # appears permanently in the UI.
+                            # ------------------------------------
+
+                            time.sleep(1)
+
+                            st.rerun()
+
+
+                        else:
+
+                            st.warning(
+                                "Decision was accepted by n8n, "
+                                "but the audit record has not "
+                                "appeared yet."
+                            )
+
+                            st.info(
+                                "Open the Audit log tab and "
+                                "click Refresh."
+                            )
+
+
+                    # ============================================
+                    # HITL ERROR HANDLING
+                    # ============================================
+
+                    except requests.exceptions.ConnectionError:
+
+                        st.error(
+                            "Could not reach the n8n resume URL. "
+                            "Check that ngrok and the proxy are "
+                            "still running."
                         )
 
 
-                        st.session_state.decided = last
+                    except requests.exceptions.Timeout:
 
-                        st.session_state.n8n_execution_id = None
-
-
-                        st.rerun()
+                        st.error(
+                            "The HITL decision request timed out."
+                        )
 
 
                     except Exception as e:
@@ -1079,7 +1387,7 @@ with tab_case:
 
 
 # ============================================================
-# AUDIT TAB
+# AUDIT LOG TAB
 # ============================================================
 
 with tab_audit:
@@ -1089,30 +1397,37 @@ with tab_audit:
     )
 
 
-    # --------------------------------------------------------
-    # Refresh button
-    # --------------------------------------------------------
+    # ========================================================
+    # REFRESH BUTTON
+    # ========================================================
 
     if st.button(
-        "Refresh"
+        "Refresh",
+        key="refresh_audit"
     ):
 
         st.rerun()
 
 
-    # --------------------------------------------------------
-    # Load audit records
-    # --------------------------------------------------------
+    # ========================================================
+    # LOAD AUDIT LOG
+    # ========================================================
 
     try:
 
-        rows = requests.get(
+        audit_response = requests.get(
             DATA_API + "/audit",
             params={
                 "_t": time.time()
             },
             timeout=10
-        ).json()
+        )
+
+
+        audit_response.raise_for_status()
+
+
+        rows = audit_response.json()
 
 
         if rows:
@@ -1121,6 +1436,10 @@ with tab_audit:
                 rows
             )
 
+
+            # --------------------------------------------
+            # Sort newest first
+            # --------------------------------------------
 
             if "logged_at" in audit_df.columns:
 
@@ -1144,7 +1463,7 @@ with tab_audit:
             )
 
 
-    except Exception:
+    except Exception as e:
 
         st.error(
             "Audit log not reachable."
