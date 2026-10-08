@@ -1,0 +1,40 @@
+{
+  "rules": [
+    {
+      "id": "R1_AMOUNT_GT_5X_AVG",
+      "desc": "Amount greater than 5x customer average",
+      "weight": 30
+    },
+    {
+      "id": "R2_NEW_COUNTRY",
+      "desc": "Transaction country differs from usual country",
+      "weight": 25
+    },
+    {
+      "id": "R3_NEW_DEVICE",
+      "desc": "Device not previously associated with customer",
+      "weight": 20
+    },
+    {
+      "id": "R4_VELOCITY_3_IN_10MIN",
+      "desc": "3 or more transactions within 10 minutes",
+      "weight": 25
+    },
+    {
+      "id": "R5_OFF_HOURS",
+      "desc": "Outside typical hours 08-23",
+      "weight": 10
+    }
+  ],
+  "thresholds": {
+    "low_max": 29,
+    "medium_max": 59,
+    "high_min": 60,
+    "min_confidence_to_proceed": 0.7
+  },
+  "policy": {
+    "travel_flag_reduces_R2_weight_to": 5,
+    "never_auto_block": true,
+    "missing_required_field_action": "escalate"
+  }
+}
